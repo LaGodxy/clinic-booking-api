@@ -5,6 +5,18 @@
 <title>Clinic appointments</title>
 <style>
 *{box-sizing:border-box}body{margin:0;background:#edf4f1;color:#17332d;font:16px system-ui,sans-serif}main{max-width:680px;margin:8vh auto;padding:24px}h1{font:clamp(2.6rem,7vw,4rem)/1 Georgia,serif;letter-spacing:-.05em;margin:0 0 30px}section{background:white;border:1px solid #d0ded8;border-radius:20px;padding:clamp(20px,5vw,36px);box-shadow:0 10px 30px #17332d0d}h2{margin:0 0 20px}form{display:grid;gap:16px}label{display:grid;gap:6px;font-weight:600}input,select,button{font:inherit;padding:12px;border-radius:8px;min-width:0}input,select{border:1px solid #81968e;background:white;color:inherit;width:100%}button{background:#175640;color:white;border:0;font-weight:650;cursor:pointer}button:disabled{opacity:.55;cursor:default}button.secondary{background:#e1eee8;color:#174c3a}hr{border:0;border-top:1px solid #d0ded8;margin:24px 0}#message{margin:18px 0 0;overflow-wrap:anywhere}#message:empty{display:none}[hidden]{display:none!important}
+dialog {
+  width: min(440px, calc(100% - 32px));
+  padding: 28px;
+  border: 1px solid #d0ded8;
+  border-radius: 20px;
+  color: inherit;
+  box-shadow: 0 16px 48px #17332d33;
+}
+dialog::backdrop { background: #17332d88; }
+dialog dd { margin: 4px 0 16px; overflow-wrap: anywhere; }
+dialog dt { font-weight: 600; }
+dialog button { width: 100%; }
 </style>
 <main>
 <h1>Clinic appointments</h1>
@@ -26,11 +38,30 @@
 <p id="message" role="status" aria-live="polite"></p>
 </section>
 </main>
+<dialog id="confirmation" aria-labelledby="confirmation-title">
+  <h2 id="confirmation-title">Appointment confirmed</h2>
+  <dl>
+    <dt>Appointment</dt>
+    <dd id="confirmed-slot"></dd>
+    <dt>Booking reference</dt>
+    <dd id="confirmed-reference"></dd>
+  </dl>
+  <form method="dialog"><button autofocus>Done</button></form>
+</dialog>
 <script>
 const access = document.querySelector('#access');
 const form = document.querySelector('#book');
 const panel = document.querySelector('#booking-panel');
 const message = document.querySelector('#message');
+const confirmation = document.querySelector('#confirmation');
+const confirmedSlot = document.querySelector('#confirmed-slot');
+const confirmedReference = document.querySelector('#confirmed-reference');
+
+confirmation.addEventListener('close', () => {
+  const target = panel.hidden ? access.querySelector('button') : form.elements.slot_id;
+  target.focus();
+});
+
 let key = '';
 let attempt;
 
@@ -84,7 +115,10 @@ form.addEventListener('submit', async event => {
       headers: {'Content-Type': 'application/json', 'Idempotency-Key': attempt.key},
       body,
     });
-    message.textContent = 'Confirmed · ' + slot + ' · Reference ' + booking.id;
+    message.textContent = '';
+    confirmedSlot.textContent = slot;
+    confirmedReference.textContent = booking.id;
+    confirmation.showModal();
     form.reset();
     attempt = undefined;
     try { await loadSlots(); } catch { panel.hidden = true; }
