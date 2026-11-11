@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clinic appointments</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#edf4f1;color:#17332d;font:16px system-ui,sans-serif}main{max-width:680px;margin:8vh auto;padding:24px}h1{font:clamp(2.6rem,7vw,4rem)/1 Georgia,serif;letter-spacing:-.05em;margin:0 0 30px}section{background:white;border:1px solid #d0ded8;border-radius:20px;padding:clamp(20px,5vw,36px);box-shadow:0 10px 30px #17332d0d}h2{margin:0 0 20px}form{display:grid;gap:16px}label{display:grid;gap:6px;font-weight:600}input,select,button{font:inherit;padding:12px;border-radius:8px;min-width:0}input,select{border:1px solid #81968e;background:white;color:inherit;width:100%}button{background:#175640;color:white;border:0;font-weight:650;cursor:pointer}button:disabled{opacity:.55;cursor:default}button.secondary{background:#e1eee8;color:#174c3a}hr{border:0;border-top:1px solid #d0ded8;margin:24px 0}#message{margin:18px 0 0;overflow-wrap:anywhere}#message:empty{display:none}[hidden]{display:none!important}
+</style>
+<main>
+<h1>Clinic appointments</h1>
+<section>
+<h2>Book a visit</h2>
+<form id="access">
+<label>API key <input name="key" type="password" required autocomplete="off"></label>
+<button class="secondary">Load available slots</button>
+</form>
+<div id="booking-panel" hidden>
+<hr>
+<form id="book">
+<label>Appointment <select name="slot_id" required></select></label>
+<label>Full name <input name="name" autocomplete="name" required></label>
+<label>Email <input name="email" type="email" autocomplete="email" required></label>
+<button>Confirm appointment</button>
+</form>
+</div>
+<p id="message" role="status" aria-live="polite"></p>
+</section>
+</main>
+<script>
+const access = document.querySelector('#access');
+const form = document.querySelector('#book');
+const panel = document.querySelector('#booking-panel');
+const message = document.querySelector('#message');
+let key = '';
+let attempt;
+
+async function api(path, options = {}) {
+  const response = await fetch(path, {
+    ...options,
+    headers: {'X-API-Key': key, ...options.headers},
+  });
+  const body = await response.json();
+  if (!response.ok) throw new Error(body.error);
+  return body;
+}
+
+async function loadSlots() {
+  const {slots} = await api('/slots');
+  const options = slots.filter(slot => slot.available && Date.parse(slot.start) > Date.now());
+  const format = new Intl.DateTimeFormat(undefined, {dateStyle: 'medium', timeStyle: 'short'});
+  form.elements.slot_id.replaceChildren(...options.map(slot =>
+    new Option(slot.provider + ' · ' + format.format(new Date(slot.start)), slot.id)));
+  panel.hidden = options.length === 0;
+  return options.length;
+}
+
+access.addEventListener('submit', async event => {
+  event.preventDefault();
+  const button = access.querySelector('button');
+  button.disabled = true;
+  panel.hidden = true;
+  key = access.elements.key.value.trim();
+  message.textContent = 'Loading slots…';
+  try {
+    message.textContent = await loadSlots() ? '' : 'No upcoming appointments are available.';
+  } catch (error) {
+    message.textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+});
+
+form.addEventListener('submit', async event => {
+  event.preventDefault();
+  const button = form.querySelector('button');
+  const body = JSON.stringify(Object.fromEntries(new FormData(form)));
+  const slot = form.elements.slot_id.selectedOptions[0].textContent;
+  if (attempt?.body !== body) attempt = {body, key: crypto.randomUUID()};
+  button.disabled = true;
+  message.textContent = 'Booking your appointment…';
+  try {
+    const booking = await api('/bookings', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'Idempotency-Key': attempt.key},
+      body,
+    });
+    message.textContent = 'Confirmed · ' + slot + ' · Reference ' + booking.id;
+    form.reset();
+    attempt = undefined;
+    try { await loadSlots(); } catch { panel.hidden = true; }
+  } catch (error) {
+    message.textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+});
+</script>
+</html>
