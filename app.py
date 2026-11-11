@@ -62,7 +62,7 @@ def transaction(write=False):
 with transaction(True) as db:
     db.execute("""CREATE TABLE IF NOT EXISTS slots (
         id TEXT PRIMARY KEY, provider TEXT NOT NULL, start TEXT NOT NULL,
-        end TEXT NOT NULL, starts_at DOUBLE PRECISION NOT NULL)""")
+        "end" TEXT NOT NULL, starts_at DOUBLE PRECISION NOT NULL)""")
     sequence = "BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY" if DATABASE_URL else "INTEGER PRIMARY KEY AUTOINCREMENT"
     db.execute(f"""CREATE TABLE IF NOT EXISTS bookings (
         seq {sequence}, id TEXT UNIQUE NOT NULL,
@@ -145,7 +145,7 @@ def reset():
 def slots():
     provider = request.args.get("provider")
     with transaction() as db:
-        rows = db.execute("""SELECT s.id, s.provider, s.start, s.end,
+        rows = db.execute("""SELECT s.id, s.provider, s.start, s."end",
             NOT EXISTS (SELECT 1 FROM bookings b WHERE b.slot_id = s.id
             AND b.status = 'confirmed') AS available
             FROM slots s WHERE (CAST(? AS TEXT) IS NULL OR s.provider = ?) ORDER BY s.starts_at, s.id""",
