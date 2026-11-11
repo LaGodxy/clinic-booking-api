@@ -15,12 +15,40 @@ from flask import Flask, jsonify, request, send_from_directory
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 1024 * 1024
 KEY = os.environ["BOOKING_API_KEY"].encode()
+DATABASE_URL = os.environ.get("DATABASE_URL")
 DATABASE = os.environ.get("BOOKING_DATABASE", "booking.sqlite3")
 ROOT = Path(__file__).resolve().parent
 
 
+class PostgresConnection:
+    def __init__(self, connection):
+        self.connection = connection
+
+    def execute(self, sql, parameters=()):
+        if isinstance(parameters, dict):
+            sql = re.sub(r":(\w+)", r"%(\1)s", sql)
+        else:
+            sql = sql.replace("?", "%s")
+        return self.connection.execute(sql, parameters)
+
+    def executemany(self, sql, rows):
+        with self.connection.cursor() as cursor:
+            cursor.executemany(sql.replace("?", "%s"), rows)
+
+
 @contextmanager
 def transaction(write=False):
+    if DATABASE_URL:
+        import psycopg
+        from psycopg.rows import dict_row
+
+        with psycopg.connect(DATABASE_URL, row_factory=dict_row) as connection:
+            db = PostgresConnection(connection)
+            if write:
+                db.execute("SELECT pg_advisory_xact_lock(712430916)")
+            yield db
+        return
+
     db = sqlite3.connect(DATABASE, timeout=30)
     db.row_factory = sqlite3.Row
     try:
@@ -34,9 +62,10 @@ def transaction(write=False):
 with transaction(True) as db:
     db.execute("""CREATE TABLE IF NOT EXISTS slots (
         id TEXT PRIMARY KEY, provider TEXT NOT NULL, start TEXT NOT NULL,
-        end TEXT NOT NULL, starts_at REAL NOT NULL)""")
-    db.execute("""CREATE TABLE IF NOT EXISTS bookings (
-        seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT UNIQUE NOT NULL,
+        end TEXT NOT NULL, starts_at DOUBLE PRECISION NOT NULL)""")
+    sequence = "BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY" if DATABASE_URL else "INTEGER PRIMARY KEY AUTOINCREMENT"
+    db.execute(f"""CREATE TABLE IF NOT EXISTS bookings (
+        seq {sequence}, id TEXT UNIQUE NOT NULL,
         slot_id TEXT NOT NULL, name TEXT NOT NULL, email TEXT NOT NULL,
         status TEXT NOT NULL, created_at TEXT NOT NULL)""")
     db.execute("""CREATE UNIQUE INDEX IF NOT EXISTS confirmed_slot
@@ -45,7 +74,7 @@ with transaction(True) as db:
     db.execute("""CREATE TABLE IF NOT EXISTS retries (
         key TEXT PRIMARY KEY, body TEXT NOT NULL, status INTEGER NOT NULL,
         response TEXT NOT NULL)""")
-    db.execute("CREATE TABLE IF NOT EXISTS attempts (email TEXT NOT NULL, at REAL NOT NULL)")
+    db.execute("CREATE TABLE IF NOT EXISTS attempts (email TEXT NOT NULL, at DOUBLE PRECISION NOT NULL)")
     db.execute("CREATE INDEX IF NOT EXISTS attempts_email ON attempts(email, at)")
 
 
@@ -119,7 +148,7 @@ def slots():
         rows = db.execute("""SELECT s.id, s.provider, s.start, s.end,
             NOT EXISTS (SELECT 1 FROM bookings b WHERE b.slot_id = s.id
             AND b.status = 'confirmed') AS available
-            FROM slots s WHERE (? IS NULL OR s.provider = ?) ORDER BY s.starts_at, s.id""",
+            FROM slots s WHERE (CAST(? AS TEXT) IS NULL OR s.provider = ?) ORDER BY s.starts_at, s.id""",
             (provider, provider))
         return jsonify(slots=[dict(row, available=bool(row["available"])) for row in rows])
 
@@ -168,11 +197,11 @@ def book():
                 return jsonify(json.loads(prior["response"])), prior["status"]
         if email:
             db.execute("DELETE FROM attempts WHERE at <= ?", (now - 60,))
-            count, earliest = db.execute(
-                "SELECT count(*), min(at) FROM attempts WHERE email = ?", (email,)).fetchone()
-            if count >= 5:
+            attempts = db.execute(
+                "SELECT count(*) AS count, min(at) AS earliest FROM attempts WHERE email = ?", (email,)).fetchone()
+            if attempts["count"] >= 5:
                 return jsonify(error="too many booking attempts"), 429, {
-                    "Retry-After": str(max(1, math.ceil(earliest + 60 - now)))}
+                    "Retry-After": str(max(1, math.ceil(attempts["earliest"] + 60 - now)))}
             db.execute("INSERT INTO attempts VALUES (?, ?)", (email, now))
         status, result = create_booking(db, body, email, now)
         if key:

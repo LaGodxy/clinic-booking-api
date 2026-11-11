@@ -23,3 +23,12 @@ The shared assessment key grants access to every API endpoint, including reset. 
 ## API behavior
 
 Every API route expects `X-API-Key`. Booking writes use a transaction and a partial unique index to prevent simultaneous confirmations for the same slot. Cancellation releases the slot. Matching idempotent replays return the original response and skip rate limiting. New attempts count toward a five-per-minute rolling limit per normalized email. Booking history uses an insertion-order cursor.
+
+## Vercel with Neon Postgres
+
+Import this repository into Vercel as a Flask project. Create a Neon database,
+then set `DATABASE_URL` to its pooled connection string and `BOOKING_API_KEY`
+to a random secret in the Vercel project's production environment. With
+`DATABASE_URL` configured, the app uses PostgreSQL and initializes its schema.
+Set both variables before deploying. Seed demo slots using the HTTPS origin
+and the production key as described above.
